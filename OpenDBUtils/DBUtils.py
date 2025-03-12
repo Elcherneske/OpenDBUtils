@@ -1,8 +1,6 @@
-from PostgreUtils import PostgreUtils
+from .PostgreUtils import PostgreUtils
 import pandas as pd
 import concurrent.futures
-from tqdm import tqdm
-import time
 from sqlalchemy import create_engine
 import polars as pl
 import base64
@@ -10,15 +8,14 @@ import pickle
 
 
 class DBUtils:
-    def __init__(self, db_name, user, password, host, port, db_instance="postgres"):
-        if db_instance == "postgres":
+    def __init__(self, db_name, user, password, host, port, db_instance="postgresql"):
+        if db_instance == "postgresql":
             self.db = PostgreUtils(db_name, user, password, host, port)
             self.engine = create_engine(f"postgresql://{user}:{password}@{host}:{port}/{db_name}")
         else:
             raise ValueError(f"Unsupported database instance: {db_instance}")
 
-    def store_df(self, data: pl.DataFrame, table_name: str, chunk_size: int = 2048, max_workers: int = 8,
-                 table_replace: bool = False):
+    def store_df(self, data: pl.DataFrame, table_name: str, chunk_size: int = 2048, max_workers: int = 8, table_replace: bool = False):
         if len(data) == 0:
             return
         if table_replace:
@@ -57,8 +54,7 @@ class DBUtils:
             data = pl.from_pandas(data)
             self.store_df(data, key, chunk_size, max_workers, table_replace)
 
-    def query_data(self, table_name: str, condition: str = None, limit: int = None, chunk_size: int = 2048,
-                   max_workers: int = 8):
+    def query_data(self, table_name: str, condition: str = None, limit: int = None, chunk_size: int = 2048, max_workers: int = 8):
         single_data = self.db.select_data_to_df(table_name, condition=condition, limit=1)
         col_types = {}
         if len(single_data) == 0:

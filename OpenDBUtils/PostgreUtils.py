@@ -1,8 +1,7 @@
 import psycopg2
 import io
-from psycopg2.extras import execute_values, execute_batch
-from sqlalchemy import create_engine
-from typing import List, Tuple, Any, Optional
+from psycopg2.extras import execute_values
+from typing import List, Tuple, Any
 import pandas as pd
 import polars as pl
 
