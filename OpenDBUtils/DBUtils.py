@@ -1,4 +1,5 @@
 from .PostgreUtils import PostgreUtils
+from .MysqlUtils import MysqlUtils
 import pandas as pd
 import concurrent.futures
 from sqlalchemy import create_engine
@@ -11,7 +12,10 @@ class DBUtils:
     def __init__(self, db_name, user, password, host, port, db_instance="postgresql"):
         if db_instance == "postgresql":
             self.db = PostgreUtils(db_name, user, password, host, port)
-            self.engine = create_engine(f"postgresql://{user}:{password}@{host}:{port}/{db_name}")
+            self.engine = create_engine(f"postgresql://{user}:{password}@{host}:{port}/{db_name}")  
+        elif db_instance == "mysql":
+            self.db = MysqlUtils(db_name, user, password, host, port)
+            self.engine = create_engine(f"mysql+mysqlconnector://{user}:{password}@{host}:{port}/{db_name}")
         else:
             raise ValueError(f"Unsupported database instance: {db_instance}")
 
@@ -22,13 +26,11 @@ class DBUtils:
             data.head(0).write_database(table_name, self.engine.connect(), if_table_exists="replace")
         num_chunks = (len(data) + chunk_size - 1) // chunk_size  # 计算总块数
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [executor.submit(self.db.copy_insert, data.slice(i * chunk_size, chunk_size), table_name) for i in
-                       range(num_chunks)]
+            futures = [executor.submit(self.db.insert_df, data.slice(i * chunk_size, chunk_size), table_name) for i in range(num_chunks)]
             for future in futures:
                 future.result()
 
-    def store_dict(self, datas: dict[str, pd.DataFrame], chunk_size: int = 2048, max_workers: int = 8,
-                   table_replace: bool = False):
+    def store_dict(self, datas: dict[str, pd.DataFrame], chunk_size: int = 2048, max_workers: int = 8, table_replace: bool = False):
         for key, data in datas.items():
             if len(data) == 0:
                 continue
@@ -55,7 +57,7 @@ class DBUtils:
             self.store_df(data, key, chunk_size, max_workers, table_replace)
 
     def query_data(self, table_name: str, condition: str = None, limit: int = None, chunk_size: int = 2048, max_workers: int = 8):
-        single_data = self.db.select_data_to_df(table_name, condition=condition, limit=1)
+        single_data = self.db.select_df(table_name, condition=condition, limit=1)
         col_types = {}
         if len(single_data) == 0:
             return None
@@ -78,7 +80,7 @@ class DBUtils:
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [
                 executor.submit(
-                    self.db.select_data_to_df,
+                    self.db.select_df,
                     table_name,
                     condition=condition,
                     limit=chunk_size,
@@ -101,9 +103,6 @@ class DBUtils:
         # Combine all chunks
         data = pd.concat(partial_dfs, ignore_index=True)
         return data
-
-    def execute_query(self, sql: str) -> pd.DataFrame:
-        return self.db.execute_query(sql)
 
     def _to_base64(self, entry: any):
         if entry is None:

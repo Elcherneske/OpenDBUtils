@@ -1,14 +1,14 @@
-import psycopg2
+import mysql.connector
 import io
-from psycopg2.extras import execute_values
 from typing import List, Tuple, Any
 import pandas as pd
 import polars as pl
+from mysql.connector import Error
 from .DBInterface import DBInterface
+from sqlalchemy import create_engine
 
-
-class PostgreUtils(DBInterface):
-    def __init__(self, dbname: str, user: str, password: str, host: str = 'localhost', port: str = '5432'):
+class MysqlUtils(DBInterface):
+    def __init__(self, dbname: str, user: str, password: str, host: str = 'localhost', port: str = '3306'):
         """初始化数据库连接参数"""
         self.dbname = dbname
         self.user = user
@@ -19,8 +19,8 @@ class PostgreUtils(DBInterface):
     def _connect(self):
         """建立数据库连接"""
         try:
-            conn = psycopg2.connect(
-                dbname=self.dbname,
+            conn = mysql.connector.connect(
+                database=self.dbname,
                 user=self.user,
                 password=self.password,
                 host=self.host,
@@ -28,16 +28,16 @@ class PostgreUtils(DBInterface):
             )
             cursor = conn.cursor()
             return conn, cursor
-        except Exception as e:
+        except Error as e:
             raise Exception(f"数据库连接失败: {str(e)}")
-    
+
     def execute(self, sql: str) -> any:
         """执行任意SQL语句"""
         try:
             conn, cursor = self._connect()
             cursor.execute(sql)
             return cursor.fetchall()
-        except Exception as e:
+        except Error as e:
             conn.rollback()
             raise Exception(f"执行SQL语句失败: {str(e)}")
         finally:
@@ -48,7 +48,7 @@ class PostgreUtils(DBInterface):
         """
         创建数据表
         :param table_name: 表名
-        :param columns: 列定义列表，例如 ["id SERIAL PRIMARY KEY", "name VARCHAR(100)"]
+        :param columns: 列定义列表，例如 ["id INT AUTO_INCREMENT PRIMARY KEY", "name VARCHAR(100)"]
         """
         try:
             conn, cursor = self._connect()
@@ -56,7 +56,7 @@ class PostgreUtils(DBInterface):
             create_table_query = f"CREATE TABLE IF NOT EXISTS {table_name} ({columns_str})"
             cursor.execute(create_table_query)
             conn.commit()
-        except Exception as e:
+        except Error as e:
             conn.rollback()
             raise Exception(f"创建表失败: {str(e)}")
         finally:
@@ -77,7 +77,7 @@ class PostgreUtils(DBInterface):
             insert_query = f"INSERT INTO {table_name} ({columns_str}) VALUES ({placeholders})"
             cursor.execute(insert_query, values)
             conn.commit()
-        except Exception as e:
+        except Error as e:
             conn.rollback()
             raise Exception(f"插入数据失败: {str(e)}")
         finally:
@@ -91,20 +91,14 @@ class PostgreUtils(DBInterface):
         :param table_name: 表名
         """
         try:
-            if isinstance(data, pd.DataFrame):
-                data = pl.from_pandas(data)
-            output = io.BytesIO()
-            data.write_csv(output, include_header=False)
-            conn, cursor = self._connect()
-            output.seek(0)
-            cursor.copy_from(output, table_name, sep=',', null="")
-            conn.commit()
-            conn.close()
+            if isinstance(data, pl.DataFrame):
+                data = data.to_pandas()
+            engine = create_engine(f"mysql+mysqlconnector://{self.user}:{self.password}@{self.host}:{self.port}/{self.dbname}")
+            data.to_sql(table_name, engine, if_exists='append', index=False)
         except Exception as e:
             raise Exception(f"copy插入数据失败: {str(e)}")
         finally:
-            cursor.close()
-            conn.close()
+            pass
 
     def select_data(self, table_name: str, columns: List[str] = ["*"], condition: str = None, limit: int = None, offset: int = None) -> List[Tuple]:
         """
@@ -128,7 +122,7 @@ class PostgreUtils(DBInterface):
                 select_query += f" OFFSET {offset}"
             cursor.execute(select_query)
             return cursor.fetchall()
-        except Exception as e:
+        except Error as e:
             raise Exception(f"查询数据失败: {str(e)}")
         finally:
             cursor.close()
@@ -155,11 +149,11 @@ class PostgreUtils(DBInterface):
             if offset:
                 select_query += f" OFFSET {offset}"
             return pd.read_sql_query(select_query, conn)
-        except Exception as e:
+        except Error as e:
             raise Exception(f"查询数据失败: {str(e)}")
         finally:
-            conn.close()
             cursor.close()
+            conn.close()
 
     def count_data(self, table_name: str, condition: str = None) -> int:
         """
@@ -175,7 +169,7 @@ class PostgreUtils(DBInterface):
                 count_query += f" WHERE {condition}"
             cursor.execute(count_query)
             return cursor.fetchone()[0]
-        except Exception as e:
+        except Error as e:
             raise Exception(f"查询数据数量失败: {str(e)}")
         finally:
             cursor.close()
@@ -192,7 +186,7 @@ class PostgreUtils(DBInterface):
             delete_query = f"DELETE FROM {table_name} WHERE {condition}"
             cursor.execute(delete_query)
             conn.commit()
-        except Exception as e:
+        except Error as e:
             conn.rollback()
             raise Exception(f"删除数据失败: {str(e)}")
         finally:
@@ -209,9 +203,9 @@ class PostgreUtils(DBInterface):
             drop_query = f"DROP TABLE IF EXISTS {table_name}"
             cursor.execute(drop_query)
             conn.commit()
-        except Exception as e:
+        except Error as e:
             conn.rollback()
             raise Exception(f"删除表失败: {str(e)}")
         finally:
             cursor.close()
-            conn.close()
+            conn.close() 
