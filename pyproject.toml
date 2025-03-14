@@ -23,6 +23,8 @@ dependencies = [
     "psycopg2-binary>=2.9.0",
     "mysql-connector-python>=8.0.0",
     "sqlalchemy>=1.4.0",
+    "concurrent-futures>=3.0.0",
+    "sqlite3>=3.0.0"
 ]
 
 [project.urls]
