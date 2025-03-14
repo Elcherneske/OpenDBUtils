@@ -10,6 +10,7 @@ from .DBInterface import DBInterface
 class PostgreUtils(DBInterface):
     def __init__(self, dbname: str, user: str, password: str, host: str = 'localhost', port: str = '5432'):
         """初始化数据库连接参数"""
+        super().__init__(dbname, user, password, host, port)
         self.dbname = dbname
         self.user = user
         self.password = password
