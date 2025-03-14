@@ -1,12 +1,13 @@
 from .PostgreUtils import PostgreUtils
 from .MysqlUtils import MysqlUtils
+from .SQLiteUtils import SQLiteUtils
 import pandas as pd
 import concurrent.futures
 from sqlalchemy import create_engine
 import polars as pl
 import base64
 import pickle
-
+from typing import List
 
 class DBUtils:
     def __init__(self, db_name, user, password, host, port, db_instance="postgresql"):
@@ -16,6 +17,9 @@ class DBUtils:
         elif db_instance == "mysql":
             self.db = MysqlUtils(db_name, user, password, host, port)
             self.engine = create_engine(f"mysql+mysqlconnector://{user}:{password}@{host}:{port}/{db_name}")
+        elif db_instance == "sqlite":
+            self.db = SQLiteUtils(db_name, user, password, host, port)
+            self.engine = create_engine(f"sqlite:///{db_name}")
         else:
             raise ValueError(f"Unsupported database instance: {db_instance}")
 
@@ -56,8 +60,8 @@ class DBUtils:
             data = pl.from_pandas(data)
             self.store_df(data, key, chunk_size, max_workers, table_replace)
 
-    def query_data(self, table_name: str, condition: str = None, limit: int = None, chunk_size: int = 2048, max_workers: int = 8):
-        single_data = self.db.select_df(table_name, condition=condition, limit=1)
+    def query_df(self, table_name: str, columns: List[str] = ["*"], condition: str = None, limit: int = None, chunk_size: int = 2048, max_workers: int = 8) -> pd.DataFrame:
+        single_data = self.db.select_df(table_name, columns=columns, condition=condition, limit=1)
         col_types = {}
         if len(single_data) == 0:
             return None
@@ -82,6 +86,7 @@ class DBUtils:
                 executor.submit(
                     self.db.select_df,
                     table_name,
+                    columns=columns,
                     condition=condition,
                     limit=chunk_size,
                     offset=i * chunk_size
@@ -103,6 +108,52 @@ class DBUtils:
         # Combine all chunks
         data = pd.concat(partial_dfs, ignore_index=True)
         return data
+
+    def query_df_sql(self, sql: str) -> pd.DataFrame:
+        """
+        执行SQL查询并返回DataFrame
+        :param sql: SQL查询语句
+        :return: 查询结果DataFrame
+        """
+        sql = sql.lower()
+        if not sql.strip().startswith("select"):
+            raise ValueError("只支持SELECT查询语句")
+            
+        # 提取FROM后的表名
+        if len(sql.split(" from ")) < 2:
+            raise ValueError("FROM语句缺失")
+        table_name = sql.split("from")[1].strip().split("where")[0].strip()
+
+        # 提取列名
+        columns = []
+        columns_part = sql.split("select")[1].strip().split("from")[0].strip()
+        if columns_part == "*":
+            columns = ["*"]
+        else:
+            if ' as ' in columns_part:
+                columns = [columns_part]
+            else:
+                columns = [col.strip() for col in columns_part.split(",")]
+
+        # 提取WHERE条件（如果有）
+        condition = None
+        if " where " in sql:
+            condition = sql.split("where")[1].strip()
+        
+        # 使用query_df方法执行查询
+        return self.query_df(table_name, columns=columns, condition=condition)
+    
+    def execute_sql(self, sql: str) -> any:
+        return self.db.execute(sql)
+
+    def drop_table(self, table_name: str):
+        return self.db.drop_table(table_name)
+    
+    def create_table(self, table_name: str, columns: List[str]):
+        return self.db.create_table(table_name, columns)
+
+    def create_table_df(self, table_name: str, df: pd.DataFrame):
+        df.head(0).write_database(table_name, self.engine.connect(), if_table_exists="replace")
 
     def _to_base64(self, entry: any):
         if entry is None:

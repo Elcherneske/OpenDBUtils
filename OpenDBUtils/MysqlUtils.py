@@ -10,6 +10,7 @@ from sqlalchemy import create_engine
 class MysqlUtils(DBInterface):
     def __init__(self, dbname: str, user: str, password: str, host: str = 'localhost', port: str = '3306'):
         """初始化数据库连接参数"""
+        super().__init__(dbname, user, password, host, port)
         self.dbname = dbname
         self.user = user
         self.password = password
