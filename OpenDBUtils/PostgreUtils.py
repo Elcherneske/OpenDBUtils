@@ -31,7 +31,7 @@ class PostgreUtils(DBInterface):
             return conn, cursor
         except Exception as e:
             raise Exception(f"数据库连接失败: {str(e)}")
-    
+
     def execute(self, sql: str) -> any:
         """执行任意SQL语句"""
         try:
@@ -85,7 +85,7 @@ class PostgreUtils(DBInterface):
             cursor.close()
             conn.close()
 
-    def insert_df(self, data: pd.DataFrame|pl.DataFrame, table_name: str):
+    def insert_df(self, data: pd.DataFrame | pl.DataFrame, table_name: str):
         """
         使用copy命令插入数据
         :param data: 数据框
@@ -95,10 +95,10 @@ class PostgreUtils(DBInterface):
             if isinstance(data, pd.DataFrame):
                 data = pl.from_pandas(data)
             output = io.BytesIO()
-            data.write_csv(output, include_header=False)
+            data.write_csv(output, include_header=False, separator='\t')
             conn, cursor = self._connect()
             output.seek(0)
-            cursor.copy_from(output, table_name, sep=',', null="")
+            cursor.copy_from(output, table_name, sep='\t', null="")
             conn.commit()
             conn.close()
         except Exception as e:
@@ -107,7 +107,8 @@ class PostgreUtils(DBInterface):
             cursor.close()
             conn.close()
 
-    def select_data(self, table_name: str, columns: List[str] = ["*"], condition: str = None, limit: int = None, offset: int = None) -> List[Tuple]:
+    def select_data(self, table_name: str, columns: List[str] = ["*"], condition: str = None, limit: int = None,
+                    offset: int = None) -> List[Tuple]:
         """
         查询数据
         :param table_name: 表名
@@ -135,7 +136,8 @@ class PostgreUtils(DBInterface):
             cursor.close()
             conn.close()
 
-    def select_df(self, table_name: str, columns: List[str] = ["*"], condition: str = None, limit: int = None, offset: int = None) -> pd.DataFrame:
+    def select_df(self, table_name: str, columns: List[str] = ["*"], condition: str = None, limit: int = None,
+                  offset: int = None) -> pd.DataFrame:
         """
         查询数据并转换为DataFrame
         :param table_name: 表名
