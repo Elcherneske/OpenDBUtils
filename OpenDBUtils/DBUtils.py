@@ -23,9 +23,11 @@ class DBUtils:
         else:
             raise ValueError(f"Unsupported database instance: {db_instance}")
 
-    def store_df(self, data: pl.DataFrame, table_name: str, chunk_size: int = 2048, max_workers: int = 8, table_replace: bool = False):
+    def store_df(self, data: pl.DataFrame | pd.DataFrame, table_name: str, chunk_size: int = 2048, max_workers: int = 8, table_replace: bool = False):
         if len(data) == 0:
             return
+        if isinstance(data, pd.DataFrame):
+            data = pl.from_pandas(data)
         if table_replace:
             data.head(0).write_database(table_name, self.engine.connect(), if_table_exists="replace")
         num_chunks = (len(data) + chunk_size - 1) // chunk_size  # 计算总块数
@@ -161,7 +163,7 @@ class DBUtils:
         binary_data = pickle.dumps(entry)
         base64_str = base64.b64encode(binary_data).decode('utf-8')
         return "base64_encode::" + base64_str
-
+    
     def _from_base64(self, entry: str):
         if entry is None:
             return None
