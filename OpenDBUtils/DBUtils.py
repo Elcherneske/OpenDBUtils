@@ -27,7 +27,7 @@ class DBUtils:
         if len(data) == 0:
             return
         if isinstance(data, pd.DataFrame):
-            data = pl.from_pandas(data)
+            data = pl.from_pandas(data,include_index=True)
         if table_replace:
             data.head(0).write_database(table_name, self.engine.connect(), if_table_exists="replace")
         num_chunks = (len(data) + chunk_size - 1) // chunk_size  # 计算总块数
@@ -59,7 +59,7 @@ class DBUtils:
             for col in data.columns:
                 if not col_types[col]:
                     data[col] = data[col].apply(self._to_base64)
-            data = pl.from_pandas(data)
+            data = pl.from_pandas(data,include_index=True)
             self.store_df(data, key, chunk_size, max_workers, table_replace)
 
     def query_df(self, table_name: str, columns: List[str] = ["*"], condition: str = None, limit: int = None, chunk_size: int = 2048, max_workers: int = 8) -> pd.DataFrame:
@@ -109,6 +109,7 @@ class DBUtils:
                 future.result()
         # Combine all chunks
         data = pd.concat(partial_dfs, ignore_index=True)
+        data = data.set_index(data.columns[0])
         return data
 
     def query_df_sql(self, sql: str) -> pd.DataFrame:
