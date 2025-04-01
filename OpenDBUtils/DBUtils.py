@@ -8,6 +8,7 @@ import polars as pl
 import base64
 import pickle
 from typing import List
+import numpy as np
 
 class DBUtils:
     def __init__(self, db_name, user, password, host, port, db_instance="postgresql"):
@@ -24,10 +25,12 @@ class DBUtils:
             raise ValueError(f"Unsupported database instance: {db_instance}")
 
     def store_df(self, data: pl.DataFrame | pd.DataFrame, table_name: str, chunk_size: int = 2048, max_workers: int = 8, table_replace: bool = False):
-        if len(data) == 0:
+        if data is None:
             return
-        if isinstance(data, pd.DataFrame):
-            data = pl.from_pandas(data,include_index=True)
+        if isinstance(data, pl.DataFrame):
+            data = data.to_pandas()
+        data = DataFrameUtils(data).encode()
+        data = pl.from_pandas(data,include_index=True)
         if table_replace:
             data.head(0).write_database(table_name, self.engine.connect(), if_table_exists="replace")
         num_chunks = (len(data) + chunk_size - 1) // chunk_size  # 计算总块数
@@ -38,43 +41,9 @@ class DBUtils:
 
     def store_dict(self, datas: dict[str, pd.DataFrame], chunk_size: int = 2048, max_workers: int = 8, table_replace: bool = False):
         for key, data in datas.items():
-            if len(data) == 0:
-                continue
-            col_types = {}
-            for col in data.columns:
-                if data[col].iloc[0] is None:
-                    filtered_df = data[data[col].notna()]
-                    if (len(filtered_df) > 0 and isinstance(filtered_df[col].iloc[0], (str, int, float))) or len(
-                            filtered_df) == 0:
-                        col_types[col] = True
-                    else:
-                        col_types[col] = False
-                else:
-                    if isinstance(data[col].iloc[0], (str, int, float)):
-                        col_types[col] = True
-                    else:
-                        col_types[col] = False
-
-            # processed dataframe && store
-            for col in data.columns:
-                if not col_types[col]:
-                    data[col] = data[col].apply(self._to_base64)
-            data = pl.from_pandas(data,include_index=True)
             self.store_df(data, key, chunk_size, max_workers, table_replace)
 
     def query_df(self, table_name: str, columns: List[str] = ["*"], condition: str = None, limit: int = None, chunk_size: int = 2048, max_workers: int = 8) -> pd.DataFrame:
-        single_data = self.db.select_df(table_name, columns=columns, condition=condition, limit=1)
-        col_types = {}
-        if len(single_data) == 0:
-            return None
-        else:
-            for col in single_data.columns:
-                if isinstance(single_data[col].iloc[0], str) and single_data[col].iloc[0].startswith("base64_encode::"):
-                    col_types[col] = True
-                else:
-                    col_types[col] = False
-
-        # Get total count first
         total_count = self.db.count_data(table_name, condition)
         if limit:
             total_count = min(total_count, limit)
@@ -98,10 +67,9 @@ class DBUtils:
                 df = future.result()
                 partial_dfs.append(df)
 
-        def process_df(df):
-            for col in df.columns:
-                if col_types[col]:
-                    df[col] = df[col].apply(self._from_base64)
+        def process_df(df: pd.DataFrame):
+            df = DataFrameUtils(df).decode()
+            return df
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [executor.submit(process_df, df) for df in partial_dfs]
@@ -158,6 +126,55 @@ class DBUtils:
     def create_table_df(self, table_name: str, df: pd.DataFrame):
         df.head(0).write_database(table_name, self.engine.connect(), if_table_exists="replace")
 
+
+class DataFrameUtils:
+    def __init__(self, data: pd.DataFrame):
+        self.data = data
+    
+    def encode(self):
+        if self.data is None or len(self.data) == 0:
+            return None
+        col_types = self._check_column_types(self.data)
+        for col in self.data.columns:
+            if not col in col_types:
+                raise ValueError(f"Column {col} not found in DataFrame")
+            if col_types[col] == 1:
+                self.data[col] = self.data[col].apply(self._to_base64)
+            elif col_types[col] == 2:
+                self.data[col] = self.data[col].apply(self._to_int)
+            elif col_types[col] == 3:
+                self.data[col] = self.data[col].apply(self._to_float)
+            elif col_types[col] == -1:
+                self.data[col] = self.data[col].apply(self._to_pickle_base64)
+        return self.data
+
+    def decode(self):
+        if self.data is None or len(self.data) == 0:
+            return None
+        for col in self.data.columns:
+            filtered_df = self.data[self.data[col].notna()]
+            if len(filtered_df) == 0:
+                continue
+            if isinstance(filtered_df[col].iloc[0], str) and filtered_df[col].iloc[0].startswith("base64_encode::"):
+                self.data[col] = self.data[col].apply(self._from_base64)
+            elif isinstance(filtered_df[col].iloc[0], str) and filtered_df[col].iloc[0].startswith("base64_pickle_encode::"):
+                self.data[col] = self.data[col].apply(self._from_pickle_base64)
+        return self.data
+
+    def _to_pickle_base64(self, entry: any):
+        if entry is None:
+            return None
+        binary_data = pickle.dumps(entry)
+        base64_str = base64.b64encode(binary_data).decode('utf-8')
+        return "base64_pickle_encode::" + base64_str
+    
+    def _from_pickle_base64(self, entry: str):
+        if entry is None:
+            return None
+        base64_str = entry.split("base64_pickle_encode::")[1]
+        binary_data = base64.b64decode(base64_str)
+        return pickle.loads(binary_data)
+    
     def _to_base64(self, entry: any):
         if entry is None:
             return None
@@ -171,4 +188,51 @@ class DBUtils:
         base64_str = entry.split("base64_encode::")[1]
         binary_data = base64.b64decode(base64_str)
         return pickle.loads(binary_data)
-
+    
+    def _to_int(self, entry: any):
+        if entry is None:
+            return None
+        return int(entry)
+    
+    def _to_float(self, entry: any):
+        if entry is None:
+            return None
+        return float(entry)
+    
+    def _check_column_types(self, data: pd.DataFrame) -> dict[str, int]:
+        """
+        检查DataFrame中各列的数据类型并返回类型标识
+        
+        参数:
+            data (pandas.DataFrame): 要检查的数据框
+            
+        返回:
+            dict: 键为列名，值为类型标识的字典
+                0: str, int, float, 全为空
+                1: bytes
+                2: numpy.int
+                3: numpy.float
+               -1: 其他类型
+        """
+        col_types = {}
+        if len(data) == 0:
+            return col_types
+        for col in data.columns:
+            filtered_df = data[data[col].notna()]
+            if len(filtered_df) == 0:
+                col_types[col] = 0 
+                continue
+            
+            sample_value = filtered_df[col].iloc[0]
+            if isinstance(sample_value, (str, int, float)):
+                col_types[col] = 0
+            elif isinstance(sample_value, bytes):
+                col_types[col] = 1
+            elif isinstance(sample_value, (np.integer)):
+                col_types[col] = 2
+            elif isinstance(sample_value, (np.floating)):
+                col_types[col] = 3
+            else:
+                col_types[col] = -1
+            
+        return col_types

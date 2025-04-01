@@ -76,7 +76,7 @@ users_df = pd.DataFrame({
 
 # Convert to polars DataFrame and store
 users_pl_df = pl.from_pandas(users_df)
-db_utils.store_df(users_pl_df, "users", table_replace=False)
+db_utils.store_df(users_pl_df, "users", table_replace=True)
 
 # Create and store complex data with nested structures
 complex_df = pd.DataFrame({
