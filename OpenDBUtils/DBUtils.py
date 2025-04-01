@@ -180,16 +180,14 @@ class DataFrameUtils:
     def _to_base64(self, entry: any):
         if entry is None:
             return None
-        binary_data = pickle.dumps(entry)
-        base64_str = base64.b64encode(binary_data).decode('utf-8')
+        base64_str = base64.b64encode(entry).decode('utf-8')
         return "base64_encode::" + base64_str
     
     def _from_base64(self, entry: str):
         if entry is None:
             return None
         base64_str = entry.split("base64_encode::")[1]
-        binary_data = base64.b64decode(base64_str)
-        return pickle.loads(binary_data)
+        return base64.b64decode(base64_str)
     
     def _to_int(self, entry: any):
         if entry is None:
