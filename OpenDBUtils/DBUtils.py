@@ -24,12 +24,12 @@ class DBUtils:
         else:
             raise ValueError(f"Unsupported database instance: {db_instance}")
 
-    def store_df(self, data: pl.DataFrame | pd.DataFrame, table_name: str, chunk_size: int = 2048, max_workers: int = 8, table_replace: bool = False):
+    def store_df(self, data: pl.DataFrame | pd.DataFrame, table_name: str, chunk_size: int = 2048, max_workers: int = 8, table_replace: bool = False, encode: bool = True):
         if data is None:
             return
         if isinstance(data, pl.DataFrame):
             data = data.to_pandas()
-        data = DataFrameUtils(data).encode()
+        data = DataFrameUtils(data).encode(encode)
         data = pl.from_pandas(data,include_index=True)
         if table_replace:
             data.head(0).write_database(table_name, self.engine.connect(), if_table_exists="replace")
@@ -39,9 +39,9 @@ class DBUtils:
             for future in futures:
                 future.result()
 
-    def store_dict(self, datas: dict[str, pd.DataFrame], chunk_size: int = 2048, max_workers: int = 8, table_replace: bool = False):
+    def store_dict(self, datas: dict[str, pd.DataFrame], chunk_size: int = 2048, max_workers: int = 8, table_replace: bool = False, encode: bool = True):
         for key, data in datas.items():
-            self.store_df(data, key, chunk_size, max_workers, table_replace)
+            self.store_df(data, key, chunk_size, max_workers, table_replace, encode)
 
     def query_df(self, table_name: str, columns: List[str] = ["*"], condition: str = None, limit: int = None, chunk_size: int = 2048, max_workers: int = 8) -> pd.DataFrame:
         total_count = self.db.count_data(table_name, condition)
@@ -131,20 +131,22 @@ class DataFrameUtils:
     def __init__(self, data: pd.DataFrame):
         self.data = data
     
-    def encode(self):
+    def encode(self, encode: bool = True):
         if self.data is None or len(self.data) == 0:
             return None
         col_types = self._check_column_types(self.data)
         for col in self.data.columns:
             if not col in col_types:
                 raise ValueError(f"Column {col} not found in DataFrame")
-            if col_types[col] == 1:
+            if not encode and col_types[col] != 0:
+                raise ValueError(f"Column {col} is not a common column")
+            if col_types[col] == 1 and encode:
                 self.data[col] = self.data[col].apply(self._to_base64)
-            elif col_types[col] == 2:
+            elif col_types[col] == 2 and encode:
                 self.data[col] = self.data[col].apply(self._to_int)
-            elif col_types[col] == 3:
+            elif col_types[col] == 3 and encode:
                 self.data[col] = self.data[col].apply(self._to_float)
-            elif col_types[col] == -1:
+            elif col_types[col] == -1 and encode:
                 self.data[col] = self.data[col].apply(self._to_pickle_base64)
         return self.data
 
