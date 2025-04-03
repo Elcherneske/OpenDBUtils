@@ -11,26 +11,41 @@ from typing import List
 import numpy as np
 
 class DBUtils:
-    def __init__(self, db_name, user, password, host, port, db_instance="postgresql"):
+    def __init__(self, db_name, user=None, password=None, host=None, port=None, db_instance="postgresql"):
         if db_instance == "postgresql":
+            if not user or not password or not host or not port:
+                raise ValueError("PostgreSQL数据库需要提供用户名、密码、主机和端口")
             self.db = PostgreUtils(db_name, user, password, host, port)
             self.engine = create_engine(f"postgresql://{user}:{password}@{host}:{port}/{db_name}")  
         elif db_instance == "mysql":
+            if not user or not password or not host or not port:
+                raise ValueError("MySQL数据库需要提供用户名、密码、主机和端口")
             self.db = MysqlUtils(db_name, user, password, host, port)
             self.engine = create_engine(f"mysql+mysqlconnector://{user}:{password}@{host}:{port}/{db_name}")
         elif db_instance == "sqlite":
+            if not db_name:
+                raise ValueError("SQLite数据库需要提供数据库文件名")
             self.db = SQLiteUtils(db_name, user, password, host, port)
             self.engine = create_engine(f"sqlite:///{db_name}")
         else:
             raise ValueError(f"Unsupported database instance: {db_instance}")
 
-    def store_df(self, data: pl.DataFrame | pd.DataFrame, table_name: str, chunk_size: int = 2048, max_workers: int = 8, table_replace: bool = False, encode: bool = True):
+    def store_df(
+            self, 
+            data: pl.DataFrame | pd.DataFrame, 
+            table_name: str, 
+            chunk_size: int = 2048, 
+            max_workers: int = 8, 
+            table_replace: bool = False, 
+            encode: bool = True,
+            include_index: bool = False
+    ):
         if data is None:
             return
         if isinstance(data, pl.DataFrame):
             data = data.to_pandas()
         data = DataFrameUtils(data).encode(encode)
-        data = pl.from_pandas(data,include_index=True)
+        data = pl.from_pandas(data, include_index=include_index)
         if table_replace:
             data.head(0).write_database(table_name, self.engine.connect(), if_table_exists="replace")
         num_chunks = (len(data) + chunk_size - 1) // chunk_size  # 计算总块数
@@ -39,11 +54,28 @@ class DBUtils:
             for future in futures:
                 future.result()
 
-    def store_dict(self, datas: dict[str, pd.DataFrame], chunk_size: int = 2048, max_workers: int = 8, table_replace: bool = False, encode: bool = True):
+    def store_dict(
+            self, 
+            datas: dict[str, pd.DataFrame], 
+            chunk_size: int = 2048, 
+            max_workers: int = 8, 
+            table_replace: bool = False, 
+            encode: bool = True,
+            include_index: bool = False
+    ):
         for key, data in datas.items():
-            self.store_df(data, key, chunk_size, max_workers, table_replace, encode)
+            self.store_df(data, key, chunk_size, max_workers, table_replace, encode, include_index)
 
-    def query_df(self, table_name: str, columns: List[str] = ["*"], condition: str = None, limit: int = None, chunk_size: int = 2048, max_workers: int = 8) -> pd.DataFrame:
+    def query_df(
+            self, 
+            table_name: str, 
+            columns: List[str] = ["*"], 
+            condition: str = None, 
+            limit: int = None, 
+            chunk_size: int = 2048, 
+            max_workers: int = 8,
+            include_index: bool = False
+    ) -> pd.DataFrame:
         total_count = self.db.count_data(table_name, condition)
         if limit:
             total_count = min(total_count, limit)
@@ -75,9 +107,11 @@ class DBUtils:
             futures = [executor.submit(process_df, df) for df in partial_dfs]
             for future in futures:
                 future.result()
-        # Combine all chunks
-        data = pd.concat(partial_dfs, ignore_index=True)
-        data = data.set_index(data.columns[0])
+        if include_index:
+            data = pd.concat(partial_dfs, ignore_index=True)
+            data = data.set_index(data.columns[0])
+        else:
+            data = pd.concat(partial_dfs)
         return data
 
     def query_df_sql(self, sql: str) -> pd.DataFrame:
@@ -125,7 +159,6 @@ class DBUtils:
 
     def create_table_df(self, table_name: str, df: pd.DataFrame):
         df.head(0).write_database(table_name, self.engine.connect(), if_table_exists="replace")
-
 
 class DataFrameUtils:
     def __init__(self, data: pd.DataFrame):
